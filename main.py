@@ -1,9 +1,22 @@
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 import json
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
 
+# Load environment variables from .env file
+load_dotenv()
+
+# Get the OpenAI API key from .env
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise ValueError("OpenAI API key not found in .env file.")
+OpenAI.api_key = OPENAI_API_KEY
 
 app = FastAPI()
+
+client = OpenAI()
 
 # Read data.json at startup
 try:
@@ -11,7 +24,7 @@ try:
         movies = json.load(f)
 except FileNotFoundError:
     movies = []
-    print("data.json file not found!")
+    print("movies.json file not found!")
 except json.JSONDecodeError:
     movies = []
     print("Error decoding JSON data.")
@@ -72,6 +85,43 @@ async def get_by_year(year: int):
             detail=f"We don't have any {year} movie currently. Please check again later"
         )
     return{"movies": moviesYear}
+
+# Get movie summary
+def generate_movie_summary(title: str, year: int, genre: str) -> str:
+    """
+    Generated Movie Summary from OpenAI API
+    """
+    prompt = (
+        f"Write a concise and engaging summary for a movie titled '{title}' "
+        f"released in {year}. The genre of the movie is {genre}. "
+        f"Focus on the plot and main themes without revealing spoilers."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model= "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert movie reviewer."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response.choice[0].message
+    except Exception as e:
+        return f"Error generating summary: {str(e)}"
+
+@app.get("/api/movies/summary/{id}")
+async def get_movie_summary(id: int):
+    """AI Generated Movie Summary by ID"""
+    movie = next((m for m in movies if m["id"] == id), None)
+    if not movie:
+        raise HTTPException(status_code=404, detail="Movie Not Found")
+    
+    summary = generate_movie_summary(movie["title"], movie["year"], movie["genre"])
+    return {
+        "id": movie["id"],
+        "title": movie["title"],
+        "summary": summary
+    }
 
 if __name__ == "__main__":
     import uvicorn
